@@ -4,8 +4,11 @@ import dotenv from "dotenv";
 import cors from "cors";
 import mongoose from "mongoose";
 import User from "./Models/userModel.js";
+import Message from "./Models/Message.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { Server } from "socket.io";
+import http from "http";
 
 dotenv.config();
 const PORT = process.env.PORT || 5000;
@@ -23,6 +26,13 @@ async function main() {
 }
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: ["http://localhost:5173", "https://chat-app-seven-dun.vercel.app","https://chat-rhd.netlify.app/meta.json","https://chatapp-front-062p.onrender.com"],
+    methods: ["GET", "POST"],
+  },
+});
 const router = Router();
 
 app.use(express.json());
@@ -99,11 +109,45 @@ router.post("/login", async (req, res) => {
     res.status(200).json({ token });
   } catch (error) {
     console.error("Login Error:", error);
-    res.status(500).json({ error: "Internal Server Error", details: error.message });
+    res
+      .status(500)
+      .json({ error: "Internal Server Error", details: error.message });
   }
 });
 
+io.on("connection", (socket) => {
+  console.log(`⚡: ${socket.id} user just connected!`)
 
-app.listen(PORT, () => {
-  console.log(`Running on port ${PORT}`);
-});
+  socket.on("join_room", (roomID) => {
+    socket.join(roomID)
+    console.log(`User joined room ${roomID}`)
+  })
+
+  socket.on("message", async (data) => {
+    const { room, sender, message } = data
+    const newMessage = new Message({ room, sender, message })
+    try {
+      await newMessage.save()
+      io.to(room).emit("receive_message", data)
+    } catch (error) {
+      console.error("Error saving message:", error)
+    }
+  })
+
+  socket.on("disconnect", () => {
+    console.log("🔥: A user disconnected")
+  })
+})
+
+app.get("/api/messages/:roomID", async (req, res) => {
+  try {
+    const messages = await Message.find({ room: req.params.roomID }).sort("timestamp")
+    res.json(messages)
+  } catch (error) {
+    res.status(500).send(error)
+  }
+})
+
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`)
+})
